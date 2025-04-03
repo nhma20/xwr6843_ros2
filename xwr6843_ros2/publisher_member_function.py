@@ -299,7 +299,6 @@ class Detected_Points:
 
 
 xyzdata = []
-xyz_mutex = False # True = locked, false = open
 
 class MinimalPublisher(Node):
     def __init__(self):
@@ -345,11 +344,9 @@ class MinimalPublisher(Node):
 
 
     def timer_callback(self):
-        global xyz_mutex, xyzdata
-        while xyz_mutex == True:
-            pass
+        global xyzdata
+
         if not xyzdata == []: 
-            xyz_mutex == True
             temp_cloud_arr = np.asarray(xyzdata).astype(np.float32) # on form [[x,y,z],[x,y,z],[x,y,z]..]
             cloud_arr = []
 
@@ -362,27 +359,30 @@ class MinimalPublisher(Node):
 
             cloud_arr = np.asarray(cloud_arr).astype(np.float32)
             
-            if np.size(cloud_arr) < 1: 
-                return
-
             pcl_msg = PointCloud2()
             pcl_msg.header = std_msgs.msg.Header()
             pcl_msg.header.stamp = self.get_clock().now().to_msg()
             pcl_msg.header.frame_id = frame_id 
-            pcl_msg.height = 1 # because unordered cloud
-            pcl_msg.width = cloud_arr.shape[0] # number of points in cloud
-            # define interpretation of pointcloud message (offset is in bytes, float32 is 4 bytes)
-            pcl_msg.fields =   [PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
-                                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
-                                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)]
-            #cloud_msg.is_bigendian = False # assumption        
-            pcl_msg.point_step = cloud_arr.dtype.itemsize*cloud_arr.shape[1] #size of 1 point (float32 * dimensions (3 when xyz))
-            pcl_msg.row_step = pcl_msg.point_step*cloud_arr.shape[0] # only 1 row because unordered
-            pcl_msg.is_dense = True
-            pcl_msg.data = cloud_arr.tostring()
+
+            if np.size(cloud_arr) < 1: 
+                pcl_msg.height = 0 # because unordered cloud
+                pcl_msg.width = 0 # number of points in cloud
+                pcl_msg.is_dense = False
+            else:
+                pcl_msg.height = 1 # because unordered cloud
+                pcl_msg.width = cloud_arr.shape[0] # number of points in cloud
+                # define interpretation of pointcloud message (offset is in bytes, float32 is 4 bytes)
+                pcl_msg.fields =   [PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+                                    PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+                                    PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)]
+                #cloud_msg.is_bigendian = False # assumption        
+                pcl_msg.point_step = cloud_arr.dtype.itemsize*cloud_arr.shape[1] #size of 1 point (float32 * dimensions (3 when xyz))
+                pcl_msg.row_step = pcl_msg.point_step*cloud_arr.shape[0] # only 1 row because unordered
+                pcl_msg.is_dense = True
+                pcl_msg.data = cloud_arr.tostring()
+            
+            self.get_logger().info('Publishing %s points' % pcl_msg.width )
             self.publisher_.publish(pcl_msg)
-            xyz_mutex = False
-            self.get_logger().info('Publishing %s points' % cloud_arr.shape[0] )
 
 
 class xwr6843_interface(object):
@@ -392,14 +392,8 @@ class xwr6843_interface(object):
 
     def update(self):
         data=next(self.stream)
-        global xyz_mutex, xyzdata
-        while xyz_mutex == True:
-            pass
-        xyz_mutex = True
-        # print("New set of points")
-        #print(data)
+        global xyzdata
         xyzdata = data
-        xyz_mutex = False
 
 
     def get_data(self):
@@ -422,7 +416,7 @@ class xwr6843_interface(object):
         while 1:
             try:
                 self.update()
-                time.sleep(ms_per_frame/2000) # sample twice as fast as radar output rate, feels smoother
+                time.sleep(ms_per_frame/10000) # sample for new points 10x as fast as radar output rate, feels smoother
 
             except Exception as exception:
 
@@ -436,8 +430,6 @@ class xwr6843_interface(object):
 
 
 def ctrlc_handler(signum, frame):
-    #res = input("Ctrl-c was pressed. Do you really want to exit? y/n ")
-    #if res == 'y':
     global shut_down
     shut_down = 1
     time.sleep(0.25)
@@ -476,4 +468,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     main()
-    
