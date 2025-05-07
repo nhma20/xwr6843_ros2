@@ -182,6 +182,8 @@ class TI:
             """
             点云
             """
+            if byte_buffer.find(MAGIC_WORD) == -1: # not present yet
+                return np.array([["nan"], ["nan"]])
             idx = byte_buffer.index(MAGIC_WORD)
             header_data, idx = self._parse_header_data(byte_buffer, idx)    
             # print("Frame num: ", header_data[3], "CPU cycles: ", header_data[4])
@@ -308,6 +310,10 @@ class Detected_Points(Node):
 
         self.data=self.data[idx2:]
         points=self.ti._process_detected_points(byte_buffer)
+        
+        if points[0][0] == "nan": # not ready yet
+            return
+
         ret=points[:,:3]
 
 
