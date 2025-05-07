@@ -1,40 +1,18 @@
-# Copyright 2016 Open Source Robotics Foundation, Inc.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-#from detected_points import Detected_Points
 import rclpy
 from rclpy.node import Node
-import os
 import time
 import numpy as np
-import threading
-from std_msgs.msg import Float64
 import std_msgs.msg
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs.msg import PointField
-from std_msgs.msg import Header
 import serial
 import struct
-import sys
 import signal
 import math
 
 
-DEBUG=False
-MAGIC_WORD_ARRAY = np.array([2, 1, 4, 3, 6, 5, 8, 7])
 MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-MSG_AZIMUT_STATIC_HEAT_MAP = 8
 ms_per_frame = 9999.0
 global shut_down
 shut_down = 0
@@ -42,9 +20,6 @@ global data_port
 data_port = '/dev/ttyUSB1'
 global cli_port
 cli_port = '/dev/ttyUSB0'
-global got_args
-got_args = False
-username = os.path.expanduser('~')
 global cfg_path
 cfg_path = '0' 
 global frame_id
@@ -55,6 +30,10 @@ global radar_azimuth_fov
 radar_azimuth_fov = 120
 global minimum_range
 minimum_range = 0.25
+global cpu_cycles
+global frame_number
+global minimal_publisher
+
 
 class TI:
     def __init__(self, sdk_version=3.4,  cli_baud=115200,data_baud=921600, num_rx=4, num_tx=3,
@@ -79,12 +58,12 @@ class TI:
     def _configure_radar(self, config):
         for i in config:
             self.cli_port.write((i + '\n').encode())
-            print(i)
+            # print(i)
             idx = i.find('frameCfg')
             if idx != -1:
                 global ms_per_frame
                 ms_per_frame = float(i.split()[5])
-                print("Found frameCfg, milliseconds per frame is ", i.split()[5])
+                # print("Found frameCfg, milliseconds per frame is ", i.split()[5])
             time.sleep(0.01)
 
     global cfg_path
@@ -151,7 +130,8 @@ class TI:
             None
 
         """
-        print("Shutting down sensor")
+        global frame_id
+        print("Shutting down %s sensor" % frame_id)
         self.cli_port.write('sensorStop\n'.encode())
         self.cli_port.close()
         self.data_port.close()
@@ -204,7 +184,13 @@ class TI:
             """
             idx = byte_buffer.index(MAGIC_WORD)
             header_data, idx = self._parse_header_data(byte_buffer, idx)    
-            # print(header_data,idx)
+            # print("Frame num: ", header_data[3], "CPU cycles: ", header_data[4])
+            # self.get_logger().info("Frame num: %s, CPU cycles %s" %  header_data[3], header_data[4])
+            global cpu_cycles
+            cpu_cycles = header_data[4]
+            global frame_number
+            frame_number = header_data[3]
+
   
             num_tlvs=header_data[6]
             
@@ -247,61 +233,10 @@ class TI:
             return None
 
 
-class Detected_Points:
+class Detected_Points(Node):
 
-    def __init__(self,cli_loc=cli_port,data_loc=data_port, cfg_path=cfg_path):
-
-        self.MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-        self.ti=TI(cli_loc=cli_loc,data_loc=data_loc,cfg_path=cfg_path)
-        self.interval=ms_per_frame/1000 # 1000 raise more?
-        self.data=b''
-        self.warn=0
-
-
-    def data_stream_iterator(self):
-        
-        while 1:
-
-            time.sleep(self.interval)
-            byte_buffer=self.ti._read_buffer()
-            
-            if(len(byte_buffer)==0):
-                self.warn+=1
-            else:
-                self.warn=0
-            if(self.warn>100):#连续10次空读取则退出 / after 10 empty frames
-                print("Wrong")
-                break
-        
-            self.data+=byte_buffer
-        
-            try:
-                idx1 = self.data.index(MAGIC_WORD)   
-                idx2 = self.data.index(MAGIC_WORD,idx1+1)
-
-            except:
-                continue
-
-            self.data=self.data[idx2:]
-            points=self.ti._process_detected_points(byte_buffer)
-            ret=points[:,:3]
-
-            yield ret
-            
-
-            global shut_down
-
-            if shut_down == 1:
-                break
-
-
-        self.ti.close()
-
-
-xyzdata = []
-
-class MinimalPublisher(Node):
     def __init__(self):
+
         super().__init__('xwr6843_pcl_pub')
 
         global cfg_path
@@ -331,23 +266,56 @@ class MinimalPublisher(Node):
         self.azimuth_tan_constant = math.tan( (radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
         self.elevation_tan_constant = math.tan( (radar_elevation_fov*0.01745329) / 2)
 
-        global got_args
-        got_args = True
-
         global ms_per_frame
-        while ms_per_frame > 5000:
-            pass
+        self.MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
+        self.ti=TI(cli_loc=cli_port,data_loc=data_port,cfg_path=cfg_path)
+        self.data=b''
+        self.warn=0
+
 
         self.publisher_ = self.create_publisher(PointCloud2, 'xwr6843_pcl', 10)
-        timer_period = float(ms_per_frame/1000)
-        self.timer = self.create_timer(timer_period, self.timer_callback)
+        timer_period = float(ms_per_frame/2000) # poll new data 2x faster than frame rate
+        self.timer = self.create_timer(timer_period, self.data_stream_iterator)
+
+        self.frame_number_array = [[],[],[],[],[],[],[],[],[],[]]
+        self.frame_number_array_ptr = 0
+        self.frame_number_array_len = len(self.frame_number_array)
+
+        self.get_logger().warn('Init %s radar' % frame_id)
 
 
-    def timer_callback(self):
-        global xyzdata
 
-        if not xyzdata == []: 
-            temp_cloud_arr = np.asarray(xyzdata).astype(np.float32) # on form [[x,y,z],[x,y,z],[x,y,z]..]
+    def data_stream_iterator(self):
+        
+        byte_buffer=self.ti._read_buffer()
+        
+        if(len(byte_buffer)==0):
+            self.warn+=1
+        else:
+            self.warn=0
+        if(self.warn>100):#连续10次空读取则退出 / after 10 empty frames
+            print("Wrong")
+            return
+    
+        self.data+=byte_buffer
+    
+        try:
+            idx1 = self.data.index(MAGIC_WORD)   
+            idx2 = self.data.index(MAGIC_WORD,idx1+1)
+
+        except:
+            return
+
+        self.data=self.data[idx2:]
+        points=self.ti._process_detected_points(byte_buffer)
+        ret=points[:,:3]
+
+
+
+        global shut_down
+
+        if not ret == []: 
+            temp_cloud_arr = np.asarray(ret).astype(np.float32) # on form [[x,y,z],[x,y,z],[x,y,z]..]
             cloud_arr = []
 
             #filter points based on expected sensor FOV
@@ -380,61 +348,36 @@ class MinimalPublisher(Node):
                 pcl_msg.row_step = pcl_msg.point_step*cloud_arr.shape[0] # only 1 row because unordered
                 pcl_msg.is_dense = True
                 pcl_msg.data = cloud_arr.tostring()
+
             
+            global cpu_cycles
+            global frame_number
+
+            # self.get_logger().info('Frame: %s' % frame_number )
+            # self.get_logger().info('CPU cycle: %s' % cpu_cycles )
+            self.frame_number_array[self.frame_number_array_ptr] = frame_number
+            self.frame_number_array_ptr = (self.frame_number_array_ptr + 1) % self.frame_number_array_len
+
+            if all(sublist == self.frame_number_array[0] for sublist in self.frame_number_array):
+                self.get_logger().fatal('\033[91mReceiving stale data, exiting %s radar\033[0m' % frame_id)
+                self.ti.close() # useless?
+                shut_down = 1
+                exit(1) # exit ungracefully to force respawn through launch file
+
             self.get_logger().info('Publishing %s points' % pcl_msg.width )
             self.publisher_.publish(pcl_msg)
 
-
-class xwr6843_interface(object):
-    def __init__(self):
-
-        self.stream = 0
-
-    def update(self):
-        data=next(self.stream)
-        global xyzdata
-        xyzdata = data
-
-
-    def get_data(self):
-
-        global got_args
-        while got_args == False:
-            pass
-
-        print("cli_port: ", cli_port)
-        print("data_port: ", data_port)
-        print("cfg_path: ", cfg_path)
-        print("frame_id: ", frame_id)
-        print("radar_azimuth_fov", radar_azimuth_fov)
-        print("radar_elevation_fov", radar_elevation_fov)
-        print("minimum_range", minimum_range)
-
-        detected_points=Detected_Points(cli_port, data_port, cfg_path)
-        self.stream = detected_points.data_stream_iterator()
-
-        while 1:
-            try:
-                self.update()
-                time.sleep(ms_per_frame/10000) # sample for new points 10x as fast as radar output rate, feels smoother
-
-            except Exception as exception:
-
-                global shut_down
-                if shut_down == 1:
-                    return
-
-                print(exception)
-                self.stream = detected_points.data_stream_iterator()
-                # return
 
 
 def ctrlc_handler(signum, frame):
     global shut_down
     shut_down = 1
+    global minimal_publisher
+    minimal_publisher.ti.close()
     time.sleep(0.25)
-    print("Exiting")
+    print("Radar ", frame_id, " exiting")
     exit(1)
+    
  
 
 
@@ -452,19 +395,16 @@ def main(argv=None):
     signal.signal(signal.SIGINT, ctrlc_handler)
 
     #init
-    xwr6843_interface_node = xwr6843_interface()
-    get_data_thread = threading.Thread(target=xwr6843_interface_node.get_data)
-    get_data_thread.start()
-
     rclpy.init()
-    minimal_publisher = MinimalPublisher()
+    global minimal_publisher
+    minimal_publisher = Detected_Points()
 
     rclpy.spin(minimal_publisher)
     #shutdown
-    get_data_thread.join()
     minimal_publisher.destroy_node()
     rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
+    
