@@ -183,7 +183,9 @@ class TI:
             点云
             """
             if byte_buffer.find(MAGIC_WORD) == -1: # not present yet
-                return np.array([["nan"], ["nan"]])
+                fail_array = np.zeros((2,6),dtype=np.float)
+                fail_array[0][0] = "nan"
+                return fail_array
             idx = byte_buffer.index(MAGIC_WORD)
             header_data, idx = self._parse_header_data(byte_buffer, idx)    
             # print("Frame num: ", header_data[3], "CPU cycles: ", header_data[4])
