@@ -183,9 +183,8 @@ class TI:
             点云
             """
             if byte_buffer.find(MAGIC_WORD) == -1: # not present yet
-                fail_array = np.zeros((2,6),dtype=np.float)
-                fail_array[0][0] = "nan"
-                return fail_array
+                fail_array = data=np.zeros((1,6),dtype=np.float)
+                return False, fail_array
             idx = byte_buffer.index(MAGIC_WORD)
             header_data, idx = self._parse_header_data(byte_buffer, idx)    
             # print("Frame num: ", header_data[3], "CPU cycles: ", header_data[4])
@@ -211,7 +210,7 @@ class TI:
                 # data[i][4]=0
                 # data[i][5]=0
 
-            return data
+            return True, data
     @staticmethod
     def _unpack(byte_buffer, idx, order='', items=1, form='I'):
         """Helper function for parsing binary byte data
@@ -311,9 +310,9 @@ class Detected_Points(Node):
             return
 
         self.data=self.data[idx2:]
-        points=self.ti._process_detected_points(byte_buffer)
+        success, points=self.ti._process_detected_points(byte_buffer)
         
-        if points[0][0] == "nan": # not ready yet
+        if not success: # not ready yet
             return
 
         ret=points[:,:3]
