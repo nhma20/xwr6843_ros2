@@ -49,7 +49,7 @@ Derived from: https://github.com/nhma20/iwr6843aop_pub
    ```
    or with ROS2 parameters:
    ```sh
-   ros2 run xwr6843_ros2 pcl_pub --ros-args -p cli_port:=/dev/ttyUSB0 -p data_port:=/dev/ttyUSB1 -p cfg_path:=/home/nm/ros2_ws/src/iwr6843isk_ros2/cfg_files/90deg_noGroup_18m_30Hz.cfg -p frame_id:=test_frame -p radar_azimuth_fov:=120
+   ros2 run xwr6843_ros2 pcl_pub --ros-args -p cli_port:=/dev/ttyUSB0 -p data_port:=/dev/ttyUSB1 -p cfg_path:=/home/nm/ros2_ws/src/xwr6843_ros2/cfg_files/90deg_noGroup_18m_30Hz.cfg -p frame_id:=test_frame -p radar_azimuth_fov:=120 -p publish_velocity:=true 
    ```
    or launch with default parameters:
    ```sh
@@ -64,7 +64,22 @@ Derived from: https://github.com/nhma20/iwr6843aop_pub
 3. 'Add' a new display (lower left corner)
 4. Select 'By topic' ribbon
 5. Find 'xwr6843_pcl PointCloud2' and add it
-6. (Optional) Set point size at PointCloud2 -> Size (m) to 0.1 for better clarity
+6. Change 'Fixed Frame' to frame of device ('xwr6843_frame' by default)
+7. (Optional) Set point size at PointCloud2 -> Size (m) to 0.1 for better clarity
+8. (Optional) If publishing doppler, snr, or noise, transform point colors by one of those values by choosing 'Color Transformer' -> 'Intensity' and 'Channel Name' -> vel/snr/noise
+
+## Options
+The following options can be appended to the `ros2 run xwr6843_ros2 pcl_pub` command:  
+`cli_port` - Config port, typically the lower numbered USB device, e.g. `/dev/ttyUSB0`  
+`data_port` - Data port, typically the higer numbered USB device, e.g. `/dev/ttyUSB1`  
+`cfg_path` - Path to configuration file, default `~/ros2_ws/src/xwr6843_ros2/cfg_files/xwr68xx_profile_25Hz_Elev_43m.cfg`  
+`frame_id` - Frame of radar device, default `xwr6843_frame`  
+`radar_elevation_fov` - Points outside this FoV (integer in degrees) are filtered away, default `120`  
+`radar_azimuth_fov` - Points outside this FoV (integer in degrees) are filtered away, default `120`  
+`minimum_range` - Points below this distance (float in meters) are filtered away, default `0.25`  
+`publish_velocity` - Boolean whether to publish radial dopper velocity information (m/s), default `true`  
+`publish_snr` - Boolean whether to publish SNR information (dB), default `true`  
+`publish_noise` - Boolean whether to publish noise information (dB), default `true`  
 
 ## Modify
 
