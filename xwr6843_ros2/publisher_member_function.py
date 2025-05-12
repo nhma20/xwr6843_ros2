@@ -9,16 +9,20 @@ import serial
 import struct
 import signal
 import math
+from pathlib import Path
 
 
 MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
-ms_per_frame = 9999.0
+ms_per_frame = 999.0
 global data_port
 data_port = '/dev/ttyUSB1'
 global cli_port
 cli_port = '/dev/ttyUSB0'
 global cfg_path
-cfg_path = '0' 
+# Get the home directory
+home = Path.home()
+deafult_file_path = home / "ros2_ws" / "src" / "xwr6843_ros2" / "cfg_files" / "xwr68xx_profile_25Hz_Elev_43m.cfg"
+cfg_path = str(deafult_file_path)
 global frame_id
 frame_id = 'xwr6843_frame'
 global radar_elevation_fov
