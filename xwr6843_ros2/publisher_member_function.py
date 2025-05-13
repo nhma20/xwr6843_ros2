@@ -207,23 +207,26 @@ class TI:
         num_tlvs=header_data[6]
         num_points = header_data[5]
         
-        data=np.zeros((num_points,6),dtype=np.float)
+        data=np.zeros((num_points,6),dtype=np.float32)
 
         for _ in range(num_tlvs):
             (tlv_type, tlv_length), idx = self._parse_header_tlv(byte_buffer, idx)
 
              ####  TVL1 - X Y Z Doppler  ####
             if tlv_type == 1 and tlv_length == num_points * 4 * 4  and (idx + num_points * 4 * 4) < len(byte_buffer):
+                print("TLV: ", tlv_type)
                 data[:, 0:4] = np.frombuffer(byte_buffer, dtype='<f4', count=num_points*4, offset=idx).reshape(num_points,4)
                 idx += tlv_length
 
             ####  TLV7 -- SNR NOISE  ####
-            elif tlv_type == 7 and tlv_length == num_points * 4 and (idx + num_points * 4) < len(byte_buffer):
+            elif tlv_type == 7: # and tlv_length == num_points * 4 and (idx + num_points * 4) < len(byte_buffer):
+                print("TLV: ", tlv_type)
                 data[:, 4:6] = np.frombuffer(byte_buffer, dtype='<u2', count=num_points*2, offset=idx).reshape(num_points,2)
                 idx += tlv_length   # skip the entire block
 
             # Other TLV → skip it
             else:
+                print("TLV: ", tlv_type)
                 idx += tlv_length
 
         return True, data
@@ -302,7 +305,7 @@ class Detected_Points(Node):
         self.azimuth_tan_constant = math.tan( (radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
         self.elevation_tan_constant = math.tan( (radar_elevation_fov*0.01745329) / 2)
 
-        self.fields = fields = [
+        self.fields = [
                     PointField(name='x', offset=0,  datatype=PointField.FLOAT32, count=1),
                     PointField(name='y', offset=4,  datatype=PointField.FLOAT32, count=1),
                     PointField(name='z', offset=8,  datatype=PointField.FLOAT32, count=1),
@@ -346,12 +349,19 @@ class Detected_Points(Node):
 
 
         self.publisher_ = self.create_publisher(PointCloud2, 'xwr6843_pcl', 10)
-        timer_period = float(ms_per_frame/2000) # poll new data 2x faster than frame rate
+        timer_period = float(ms_per_frame/1000) # poll new data 2x faster than frame rate
         self.timer = self.create_timer(timer_period, self.data_stream_iterator)
         self.serial_data_wait_iterations =  ( 1.0 / timer_period ) * 5.0
-        self.frame_number_array = [[],[],[],[],[],[],[],[],[],[]]
+        self.frame_number_array = [[],[],[]]
         self.frame_number_array_ptr = 0
         self.frame_number_array_len = len(self.frame_number_array)
+
+        self.pcl_msg = PointCloud2()
+        self.pcl_msg.header = std_msgs.msg.Header()
+        self.pcl_msg.header.frame_id = frame_id
+        self.pcl_msg.fields = self.fields
+        self.num_fields = 3 + int(publish_velocity) + int(publish_snr) + int(publish_noise)
+        self.pcl_msg.point_step = self.num_fields * 4  # each float32 = 4 bytes
 
         self.get_logger().warn('Init %s radar' % frame_id)
 
@@ -376,8 +386,6 @@ class Detected_Points(Node):
     
         try:
             idx = self.data.index(MAGIC_WORD)   
-            # idx1 = self.data.index(MAGIC_WORD)   
-            # idx2 = self.data.index(MAGIC_WORD,idx1+1)
 
         except:
             return # No magic word found yet
@@ -408,10 +416,11 @@ class Detected_Points(Node):
 
         # check that point is above minimum range & inside expected FOV 
         with np.errstate(divide='ignore', invalid='ignore'):  # <-- suppress divide‑by‑zero here
+            inv_y = np.reciprocal(y, where=y != 0)
             mask = (
                 (y > minimum_range) &
-                (np.abs(x)/y < self.azimuth_tan_constant) &
-                (np.abs(z)/y < self.elevation_tan_constant)
+                (np.abs(x * inv_y) < self.azimuth_tan_constant) &
+                (np.abs(z * inv_y) < self.elevation_tan_constant)
             )
         filtered = points[mask]        # shape (M,6)
 
@@ -421,7 +430,7 @@ class Detected_Points(Node):
         if publish_snr:      cols.append(4)
         if publish_noise:    cols.append(5)
 
-        cloud_arr = filtered[:, cols].astype(np.float32)  # shape (M, K)
+        cloud_arr = filtered[:, cols]# .astype(np.float32)  # shape (M, K)
 
         # # vel_idx = cols.index(3)
         # snr_idx = cols.index(4)
@@ -429,27 +438,21 @@ class Detected_Points(Node):
         # if any(x > 1000 for x in cloud_arr[:, snr_idx].astype(np.uint16)):
         #     print(cloud_arr[:, snr_idx].astype(np.uint16))
 
-        # build PointCloud2 message to publish        
-        pcl_msg = PointCloud2()
-        pcl_msg.header = std_msgs.msg.Header()
-        pcl_msg.header.stamp = self.get_clock().now().to_msg()
-        pcl_msg.header.frame_id = frame_id 
+        # fill PointCloud2 message to publish        
+        self.pcl_msg.header.stamp = self.get_clock().now().to_msg()
 
         if np.size(cloud_arr) < 1: 
-            pcl_msg.height = 0 # because unordered cloud
-            pcl_msg.width = 0 # number of points in cloud
-            pcl_msg.is_dense = False
+            self.pcl_msg.height = 0 # because unordered cloud
+            self.pcl_msg.width = 0 # number of points in cloud
+            self.pcl_msg.is_dense = False
+            self.pcl_msg.data = b''
         else:
-            pcl_msg.height = 1 # because unordered cloud
-            pcl_msg.width = cloud_arr.shape[0] # number of points in cloud
-            # define interpretation of pointcloud message (offset is in bytes, float32 is 4 bytes)
-            pcl_msg.fields = self.fields
-            #cloud_msg.is_bigendian = False # assumption        
-            pcl_msg.point_step = cloud_arr.dtype.itemsize*cloud_arr.shape[1] #size of 1 point (float32 * dimensions (3 when xyz, 6 when x y z vel snr noise))
-            pcl_msg.row_step = pcl_msg.point_step*cloud_arr.shape[0] # only 1 row because unordered
-            pcl_msg.is_dense = True
+            self.pcl_msg.height = 1 # because unordered cloud
+            self.pcl_msg.width = cloud_arr.shape[0] # number of points in cloud
+            self.pcl_msg.row_step = self.pcl_msg.point_step*self.pcl_msg.width # only 1 row because unordered
+            self.pcl_msg.is_dense = True
             cloud_arr = np.ascontiguousarray(cloud_arr) # ensure it's a single C‑contiguous buffer
-            pcl_msg.data = memoryview(cloud_arr).cast('B') #cloud_arr.tostring()
+            self.pcl_msg.data = memoryview(cloud_arr).cast('B')
 
         
         global cpu_cycles
@@ -464,8 +467,8 @@ class Detected_Points(Node):
             self.ti.close() # useless?
             exit(1) # exit ungracefully to force respawn through launch file
 
-        self.get_logger().info('Publishing %s points' % pcl_msg.width )
-        self.publisher_.publish(pcl_msg)
+        # self.get_logger().info('Publishing %s points' % self.pcl_msg.width )
+        self.publisher_.publish(self.pcl_msg)
 
 
 
