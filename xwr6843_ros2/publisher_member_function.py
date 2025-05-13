@@ -346,7 +346,7 @@ class Detected_Points(Node):
 
 
         self.publisher_ = self.create_publisher(PointCloud2, 'xwr6843_pcl', 10)
-        timer_period = float(ms_per_frame/5000) # poll new data 5x faster than frame rate
+        timer_period = float(ms_per_frame/2000) # poll new data 2x faster than frame rate
         self.timer = self.create_timer(timer_period, self.data_stream_iterator)
         self.serial_data_wait_iterations =  ( 1.0 / timer_period ) * 5.0
         self.frame_number_array = [[],[],[],[],[],[],[],[],[],[]]
