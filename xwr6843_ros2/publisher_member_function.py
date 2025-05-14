@@ -19,27 +19,13 @@ data_port = '/dev/ttyUSB1'
 global cli_port
 cli_port = '/dev/ttyUSB0'
 global cfg_path
-# Get the home directory
-home = Path.home()
+home = Path.home() # Get the home directory
 deafult_file_path = home / "ros2_ws" / "src" / "xwr6843_ros2" / "cfg_files" / "xwr68xx_profile_25Hz_Elev_43m.cfg"
 cfg_path = str(deafult_file_path)
 global frame_id
 frame_id = 'xwr6843_frame'
-global radar_elevation_fov
-radar_elevation_fov = 120
-global radar_azimuth_fov
-radar_azimuth_fov = 120
-global minimum_range
-minimum_range = 0.25
 global cpu_cycles
 global frame_number
-global minimal_publisher
-global publish_velocity
-publish_velocity = True
-global publish_snr
-publish_snr = True
-global publish_noise
-publish_noise = True
 
 
 class TI:
@@ -166,7 +152,6 @@ class TI:
         """
         # magic, idx = self._unpack(byte_buffer, idx, order='>', items=1, form='Q')
         magic, idx = self._unpack(byte_buffer, idx, order='<', items=1, form='Q')
-        # (version, length, platform, frame_num, cpu_cycles, num_obj, num_tlvs), idx = self._unpack(byte_buffer, idx, items=7, form='I')
         (version, length, platform, frame_num, cpu_cycles, num_obj, num_tlvs), idx = self._unpack(byte_buffer, idx, order='<', items=7, form='I')
         subframe_num, idx = self._unpack(byte_buffer, idx, items=1, form='I')
         return (version, length, platform, frame_num, cpu_cycles, num_obj, num_tlvs, subframe_num), idx
@@ -182,13 +167,11 @@ class TI:
         """ Parses the information of the detected points message
 
         """
-        # (x,y,z,vel), idx = self._unpack(byte_buffer, idx, items=4, form='f')
         (x,y,z,vel), idx = self._unpack(byte_buffer, idx, order='<', items=4, form='f')
        
         return (x,y,z,vel), idx
     
     def _parse_msg_detected_points_side_info(self,byte_buffer, idx):
-        # (snr,noise), idx = self._unpack(byte_buffer, idx, items=2,form='H')
         (snr,noise), idx = self._unpack(byte_buffer, idx, order='<', items=2, form='H')
         return (snr,noise),idx
 
@@ -213,20 +196,17 @@ class TI:
             (tlv_type, tlv_length), idx = self._parse_header_tlv(byte_buffer, idx)
 
              ####  TVL1 - X Y Z Doppler  ####
-            if tlv_type == 1 and tlv_length == num_points * 4 * 4  and (idx + num_points * 4 * 4) < len(byte_buffer):
-                print("TLV: ", tlv_type)
+            if tlv_type == 1: # and tlv_length == num_points * 4 * 4  and (idx + num_points * 4 * 4) <= len(byte_buffer):
                 data[:, 0:4] = np.frombuffer(byte_buffer, dtype='<f4', count=num_points*4, offset=idx).reshape(num_points,4)
-                idx += tlv_length
+                idx += tlv_length   # next block
 
             ####  TLV7 -- SNR NOISE  ####
-            elif tlv_type == 7: # and tlv_length == num_points * 4 and (idx + num_points * 4) < len(byte_buffer):
-                print("TLV: ", tlv_type)
+            elif tlv_type == 7: # and tlv_length == num_points * 4 and (idx + num_points * 4) <= len(byte_buffer):
                 data[:, 4:6] = np.frombuffer(byte_buffer, dtype='<u2', count=num_points*2, offset=idx).reshape(num_points,2)
-                idx += tlv_length   # skip the entire block
+                idx += tlv_length   # next block
 
             # Other TLV → skip it
             else:
-                print("TLV: ", tlv_type)
                 idx += tlv_length
 
         return True, data
@@ -251,13 +231,10 @@ class TI:
         size = {'H': 2, 'h': 2, 'I': 4, 'Q': 8, 'f': 4}
         try:
             data = struct.unpack(order + str(items) + form, byte_buffer[idx:idx + (items * size[form])])
-            # if len(data) == 1:
-                # data = data[0]
             if items == 1:
                 data = (data[0],)   # always make it a tuple
             return data, idx + (items * size[form])
         except:
-            # return None
             # return a default tuple of the right length plus unchanged idx
             default = tuple(0 for _ in range(items))
             return default, idx
@@ -273,37 +250,40 @@ class Detected_Points(Node):
         global data_port
         global cli_port
         global frame_id
-        global radar_elevation_fov
-        global radar_azimuth_fov
-        global minimum_range
-        global publish_velocity
-        global publish_snr
-        global publish_noise
+        self.radar_elevation_fov = 120
+        self.radar_azimuth_fov = 120
+        self.minimum_range = 0.3
+        self.publish_velocity = True
+        self.publish_snr = True
+        self.publish_noise = True
+        self.poll_rate = 5.0
 
         self.declare_parameter('data_port', data_port)
         self.declare_parameter('cli_port', cli_port)
         self.declare_parameter('cfg_path', cfg_path)
         self.declare_parameter('frame_id', frame_id)        
-        self.declare_parameter('radar_elevation_fov', radar_elevation_fov)
-        self.declare_parameter("radar_azimuth_fov", radar_azimuth_fov)
-        self.declare_parameter("minimum_range", minimum_range)
-        self.declare_parameter("publish_velocity", publish_velocity)
-        self.declare_parameter("publish_snr", publish_snr)
-        self.declare_parameter("publish_noise", publish_noise)
+        self.declare_parameter('radar_elevation_fov', self.radar_elevation_fov)
+        self.declare_parameter("radar_azimuth_fov", self.radar_azimuth_fov)
+        self.declare_parameter("minimum_range", self.minimum_range)
+        self.declare_parameter("publish_velocity", self.publish_velocity)
+        self.declare_parameter("publish_snr", self.publish_snr)
+        self.declare_parameter("publish_noise", self.publish_noise)
+        self.declare_parameter("poll_rate", self.poll_rate)
 
         data_port = self.get_parameter('data_port').get_parameter_value().string_value
         cli_port = self.get_parameter('cli_port').get_parameter_value().string_value
         cfg_path = self.get_parameter('cfg_path').get_parameter_value().string_value
         frame_id = self.get_parameter('frame_id').get_parameter_value().string_value
-        radar_elevation_fov = self.get_parameter('radar_elevation_fov').get_parameter_value().integer_value
-        radar_azimuth_fov = self.get_parameter('radar_azimuth_fov').get_parameter_value().integer_value
-        minimum_range = self.get_parameter('minimum_range').get_parameter_value().double_value
-        publish_velocity = self.get_parameter('publish_velocity').get_parameter_value().bool_value
-        publish_snr = self.get_parameter('publish_snr').get_parameter_value().bool_value
-        publish_noise = self.get_parameter('publish_noise').get_parameter_value().bool_value
+        self.radar_elevation_fov = self.get_parameter('radar_elevation_fov').get_parameter_value().integer_value
+        self.radar_azimuth_fov = self.get_parameter('radar_azimuth_fov').get_parameter_value().integer_value
+        self.minimum_range = self.get_parameter('minimum_range').get_parameter_value().double_value
+        self.publish_velocity = self.get_parameter('publish_velocity').get_parameter_value().bool_value
+        self.publish_snr = self.get_parameter('publish_snr').get_parameter_value().bool_value
+        self.publish_noise = self.get_parameter('publish_noise').get_parameter_value().bool_value
+        self.poll_rate = self.get_parameter('poll_rate').get_parameter_value().double_value
 
-        self.azimuth_tan_constant = math.tan( (radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
-        self.elevation_tan_constant = math.tan( (radar_elevation_fov*0.01745329) / 2)
+        self.azimuth_tan_constant = math.tan( (self.radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
+        self.elevation_tan_constant = math.tan( (self.radar_elevation_fov*0.01745329) / 2)
 
         self.fields = [
                     PointField(name='x', offset=0,  datatype=PointField.FLOAT32, count=1),
@@ -313,18 +293,18 @@ class Detected_Points(Node):
                     # add vel if requested
                     *(
                     [ PointField(name='vel', offset=12, datatype=PointField.FLOAT32, count=1) ]
-                    if publish_velocity else []
+                    if self.publish_velocity else []
                     ),
 
                     # add snr if requested (offset shifts by 4 if vel in or out)
                     *(
                     [ PointField(
                         name='snr',
-                        offset=12 + (4 if publish_velocity else 0),
+                        offset=12 + (4 if self.publish_velocity else 0),
                         datatype=PointField.FLOAT32,
                         count=1
                         )
-                    ] if publish_snr else []
+                    ] if self.publish_snr else []
                     ),
 
                     # add noise if requested (offset shifts by 4 for each prior inclusion)
@@ -332,12 +312,12 @@ class Detected_Points(Node):
                     [ PointField(
                         name='noise',
                         offset=12
-                                    + (4 if publish_velocity   else 0)
-                                    + (4 if publish_snr   else 0),
+                                    + (4 if self.publish_velocity   else 0)
+                                    + (4 if self.publish_snr   else 0),
                         datatype=PointField.FLOAT32,
                         count=1
                         )
-                    ] if publish_noise else []
+                    ] if self.publish_noise else []
                     ),
                 ]
 
@@ -349,9 +329,10 @@ class Detected_Points(Node):
 
 
         self.publisher_ = self.create_publisher(PointCloud2, 'xwr6843_pcl', 10)
-        timer_period = float(ms_per_frame/1000) # poll new data 2x faster than frame rate
-        self.timer = self.create_timer(timer_period, self.data_stream_iterator)
-        self.serial_data_wait_iterations =  ( 1.0 / timer_period ) * 5.0
+        self.timer_period = ms_per_frame/(1000.0*self.poll_rate) # poll new data <poll_rate> times faster than frame rate
+        print(self.timer_period)
+        self.timer = self.create_timer(self.timer_period, self.data_stream_iterator)
+        self.serial_data_wait_iterations =  ( 1.0 / self.timer_period ) * 5.0
         self.frame_number_array = [[],[],[]]
         self.frame_number_array_ptr = 0
         self.frame_number_array_len = len(self.frame_number_array)
@@ -360,34 +341,38 @@ class Detected_Points(Node):
         self.pcl_msg.header = std_msgs.msg.Header()
         self.pcl_msg.header.frame_id = frame_id
         self.pcl_msg.fields = self.fields
-        self.num_fields = 3 + int(publish_velocity) + int(publish_snr) + int(publish_noise)
+        self.num_fields = 3 + int(self.publish_velocity) + int(self.publish_snr) + int(self.publish_noise)
         self.pcl_msg.point_step = self.num_fields * 4  # each float32 = 4 bytes
 
         self.get_logger().warn('Init %s radar' % frame_id)
 
 
+    def _on_shutdown(self):
+        self.ti.close()
+        time.sleep(0.25)
+        print("Radar ", frame_id, " exiting")
+
 
     def data_stream_iterator(self):
         
         byte_buffer=self.ti._read_buffer()
-        
-        if(len(byte_buffer)==0):
-            self.warn += 1
-        else:
-            self.warn = 0
-        if(self.warn > self.serial_data_wait_iterations): # after some seconds of empty buffer reads
-            global minimal_publisher
-            minimal_publisher.ti.close()
-            print("No serial data, radar ", frame_id, " exiting")
-            time.sleep(0.25)
-            exit(1)
     
         self.data+=byte_buffer
     
         try:
             idx = self.data.index(MAGIC_WORD)   
+            # self.warn = 0
 
         except:
+            self.warn += 1
+
+            if(self.warn > self.serial_data_wait_iterations): # after some seconds of unsuccessful buffer reads
+                global minimal_publisher
+                minimal_publisher.ti.close()
+                print("No serial data, radar ", frame_id, " exiting")
+                time.sleep(0.25)
+                exit(1)
+
             return # No magic word found yet
         
         # Not enough data to read full header
@@ -409,6 +394,8 @@ class Detected_Points(Node):
         
         if not success: # not ready yet
             return
+        
+        self.warn = 0 # reset unsuccessful buffer read counter
 
         x = points[:,0]
         y = points[:,1]
@@ -418,7 +405,7 @@ class Detected_Points(Node):
         with np.errstate(divide='ignore', invalid='ignore'):  # <-- suppress divide‑by‑zero here
             inv_y = np.reciprocal(y, where=y != 0)
             mask = (
-                (y > minimum_range) &
+                (y > self.minimum_range) &
                 (np.abs(x * inv_y) < self.azimuth_tan_constant) &
                 (np.abs(z * inv_y) < self.elevation_tan_constant)
             )
@@ -426,9 +413,9 @@ class Detected_Points(Node):
 
         # pick columns based on requested data (vel, snr, noise)
         cols = [0,1,2]
-        if publish_velocity: cols.append(3)
-        if publish_snr:      cols.append(4)
-        if publish_noise:    cols.append(5)
+        if self.publish_velocity: cols.append(3)
+        if self.publish_snr:      cols.append(4)
+        if self.publish_noise:    cols.append(5)
 
         cloud_arr = filtered[:, cols]# .astype(np.float32)  # shape (M, K)
 
@@ -472,38 +459,23 @@ class Detected_Points(Node):
 
 
 
-def ctrlc_handler(signum, frame):
-    global minimal_publisher
-    minimal_publisher.ti.close()
-    time.sleep(0.25)
-    print("Radar ", frame_id, " exiting")
-    exit(1)
-    
- 
 
 
 def main(argv=None):
 
-
-    global cfg_path
-    global data_port
-    global cli_port
-    global frame_id
-    global radar_elevation_fov
-    global radar_azimuth_fov
-    global minimum_range
-    
-    signal.signal(signal.SIGINT, ctrlc_handler)
-
     #init
     rclpy.init()
-    global minimal_publisher
     minimal_publisher = Detected_Points()
-
-    rclpy.spin(minimal_publisher)
+    
+    try:
+        rclpy.spin(minimal_publisher)
     #shutdown
-    minimal_publisher.destroy_node()
-    rclpy.shutdown()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        minimal_publisher._on_shutdown()
+        minimal_publisher.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
