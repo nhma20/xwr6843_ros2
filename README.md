@@ -1,5 +1,7 @@
 # XWR6843 simple ROS2 package
 
+## This is an optimized version of the node that relies on an idle period (10ms by default) between serial transmissions. If this cannot be guaranteed (e.g. with very high frame rates or large package payloads), use the safer version on the `main` branch.
+
 ![mmw_pcl_gif](https://user-images.githubusercontent.com/76950970/194247603-18e9031a-7d34-4747-9926-9d35d6e3df4e.gif)
 
 Python ROS2 pointcloud retriever for XWR6843 mmWave devices
