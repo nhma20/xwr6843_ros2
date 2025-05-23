@@ -519,7 +519,10 @@ class Detected_Points(Node):
             cloud_arr = np.ascontiguousarray(cloud_arr) # ensure it's a single C‑contiguous buffer
             self.pcl_msg.data = memoryview(cloud_arr).cast('B')
 
-        
+    
+        # self.get_logger().info('Publishing %s points' % self.pcl_msg.width )
+        self.publisher_.publish(self.pcl_msg)
+
         global cpu_cycles
         global frame_number
 
@@ -527,13 +530,12 @@ class Detected_Points(Node):
         self.frame_number_array[self.frame_number_array_ptr] = frame_number
         self.frame_number_array_ptr = (self.frame_number_array_ptr + 1) % self.frame_number_array_len
 
-        if all(sublist == self.frame_number_array[0] for sublist in self.frame_number_array):
+        if not self.ti.reader_thread.is_alive() or all(sublist == self.frame_number_array[0] for sublist in self.frame_number_array):
             self.get_logger().fatal('\033[91mReceiving stale data, exiting %s radar\033[0m' % frame_id)
-            self.ti.close() # useless?
+            self.ti.close()
             exit(1) # exit ungracefully to force respawn through launch file
 
-        # self.get_logger().info('Publishing %s points' % self.pcl_msg.width )
-        self.publisher_.publish(self.pcl_msg)
+        
 
 
 
