@@ -256,9 +256,13 @@ class TI:
             (tlv_type, tlv_length), idx = self._parse_header_tlv(byte_buffer, idx)
 
              ####  TVL1 - X Y Z Doppler  ####
-            if tlv_type == 1: # and tlv_length == num_points * 4 * 4  and (idx + num_points * 4 * 4) <= len(byte_buffer):
+            if tlv_type == 1 and len(byte_buffer)-idx >= num_points * 4 * 4:
                 data[:, 0:4] = np.frombuffer(byte_buffer, dtype='<f4', count=num_points*4, offset=idx).reshape(num_points,4)
                 idx += tlv_length   # next block
+
+            elif tlv_type == 1 and len(byte_buffer)-idx < num_points * 4 * 4: # too few bytes received
+                fail_array = data=np.zeros((1,6),dtype=np.float)
+                return False, fail_array
 
             ####  TLV7 -- SNR NOISE  ####
             elif tlv_type == 7: # and tlv_length == num_points * 4 and (idx + num_points * 4) <= len(byte_buffer):
