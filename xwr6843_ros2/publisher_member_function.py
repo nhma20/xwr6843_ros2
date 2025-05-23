@@ -316,6 +316,7 @@ class Detected_Points(Node):
         self.publish_velocity = True
         self.publish_snr = True
         self.publish_noise = True
+        self.latency_offset_ns = 25_000_000  # 25 ms in nanoseconds
 
         self.declare_parameter('data_port', data_port)
         self.declare_parameter('cli_port', cli_port)
@@ -327,6 +328,7 @@ class Detected_Points(Node):
         self.declare_parameter("publish_velocity", self.publish_velocity)
         self.declare_parameter("publish_snr", self.publish_snr)
         self.declare_parameter("publish_noise", self.publish_noise)
+        self.declare_parameter("latency_offset_ns", self.latency_offset_ns)
 
         data_port = self.get_parameter('data_port').get_parameter_value().string_value
         cli_port = self.get_parameter('cli_port').get_parameter_value().string_value
@@ -338,6 +340,7 @@ class Detected_Points(Node):
         self.publish_velocity = self.get_parameter('publish_velocity').get_parameter_value().bool_value
         self.publish_snr = self.get_parameter('publish_snr').get_parameter_value().bool_value
         self.publish_noise = self.get_parameter('publish_noise').get_parameter_value().bool_value
+        self.latency_offset_ns = self.get_parameter('latency_offset_ns').get_parameter_value().integer_value
 
         self.azimuth_tan_constant = math.tan( (self.radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
         self.elevation_tan_constant = math.tan( (self.radar_elevation_fov*0.01745329) / 2)
@@ -396,7 +399,6 @@ class Detected_Points(Node):
         self.pcl_msg.fields = self.fields
         self.num_fields = 3 + int(self.publish_velocity) + int(self.publish_snr) + int(self.publish_noise)
         self.pcl_msg.point_step = self.num_fields * 4  # each float32 = 4 bytes
-        self.latency_offset_ns = 25_000_000  # 25 ms in nanoseconds
 
         threading.Thread(target=self._frame_consumer, daemon=True).start()
 
