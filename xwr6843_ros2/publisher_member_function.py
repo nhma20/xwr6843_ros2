@@ -396,6 +396,7 @@ class Detected_Points(Node):
         self.pcl_msg.fields = self.fields
         self.num_fields = 3 + int(self.publish_velocity) + int(self.publish_snr) + int(self.publish_noise)
         self.pcl_msg.point_step = self.num_fields * 4  # each float32 = 4 bytes
+        self.latency_offset_ns = 25_000_000  # 25 ms in nanoseconds
 
         threading.Thread(target=self._frame_consumer, daemon=True).start()
 
@@ -496,7 +497,7 @@ class Detected_Points(Node):
 
 
         #—–– Use the hardware timestamp:
-        ros_time = Time(nanoseconds=timestamp)
+        ros_time = Time(nanoseconds=timestamp-self.latency_offset_ns)
         self.pcl_msg.header.stamp = ros_time.to_msg()
 
         if np.size(cloud_arr) < 1: 
