@@ -1,4 +1,5 @@
 import rclpy
+from rclpy.time import Time
 from rclpy.node import Node
 import time
 import numpy as np
@@ -67,6 +68,9 @@ class TI:
             if not first:
                 continue
 
+            # Capture hardware‐acquisition time (in nanoseconds since POSIX epoch)
+            t_acq = time.time_ns()
+
             buf = bytearray(first)
 
             # drain any additional bytes that are already sitting in the UART buffer
@@ -82,7 +86,7 @@ class TI:
                 b = self.data_port.read(1)  # block up to `self.idle` seconds
                 if not b:
                     # timeout ↦ no new byte for idle seconds ⇒ burst finished
-                    self._frame_queue.put(bytes(buf))
+                    self._frame_queue.put((bytes(buf), t_acq))
                     buf.clear()
                     break
 
@@ -406,12 +410,16 @@ class Detected_Points(Node):
 
     def _frame_consumer(self):
         while rclpy.ok():
-            frame = self.ti.get_frame(block=True)  # block until a full burst
+            frame_tuple = self.ti.get_frame(block=True)  # block until a full burst
+            if frame_tuple is None:
+                continue
+
+            frame, timestamp = frame_tuple
             # feed it into our existing parser/publisher
-            self.data_stream_iterator(frame)
+            self.data_stream_iterator(frame, timestamp)
 
 
-    def data_stream_iterator(self, burst_bytes):
+    def data_stream_iterator(self, burst_bytes, timestamp):
            
         # accumulate serial data in a rolling buffer
         self.data.extend(burst_bytes)
@@ -486,8 +494,10 @@ class Detected_Points(Node):
         # if any(x > 1000 for x in cloud_arr[:, snr_idx].astype(np.uint16)):
         #     print(cloud_arr[:, snr_idx].astype(np.uint16))
 
-        # fill PointCloud2 message to publish        
-        self.pcl_msg.header.stamp = self.get_clock().now().to_msg()
+
+        #—–– Use the hardware timestamp:
+        ros_time = Time(nanoseconds=timestamp)
+        self.pcl_msg.header.stamp = ros_time.to_msg()
 
         if np.size(cloud_arr) < 1: 
             self.pcl_msg.height = 0 # because unordered cloud
