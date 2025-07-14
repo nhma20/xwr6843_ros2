@@ -5,11 +5,14 @@ import numpy as np
 import std_msgs.msg
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs.msg import PointField
+from toggle_radar_msgs.msg import ToggleRadar
 import serial
 import struct
 import signal
 import math
 from pathlib import Path
+import threading
+import queue
 
 
 MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
@@ -30,7 +33,7 @@ global frame_number
 
 class TI:
     def __init__(self, sdk_version=3.4,  cli_baud=115200,data_baud=921600, num_rx=4, num_tx=3,
-                 verbose=False, connect=True, mode=0,cli_loc="",data_loc="", cfg_path=""):
+                 verbose=False, connect=True, mode=0,cli_loc="",data_loc="", cfg_path="", inter_byte_timeout=0.010): # 10 ms pause will interrupt
         super(TI, self).__init__()
         self.connected = False
         self.verbose = verbose
@@ -38,20 +41,75 @@ class TI:
         self.cfg_path = cfg_path
         if connect:
             self.cli_port = serial.Serial(cli_loc, cli_baud)
-            self.data_port = serial.Serial(data_loc, data_baud)
+            self.data_port = serial.Serial(data_loc, data_baud,
+                                       timeout=None)
             self.connected = True
         self.sdk_version = sdk_version
         self.num_rx_ant = num_rx
         self.num_tx_ant = num_tx
         self.num_virtual_ant = num_rx * num_tx
+        self.idle = inter_byte_timeout 
+
+        self._shutdown = False
+
         if mode == 0:
             self._initialize()
 
+        self._frame_queue = queue.Queue()
+        self.reader_thread = threading.Thread(target=self._reader, daemon=True)#.start()
+        self.reader_thread.start()
+
+
     
+    def _reader(self):
+        while not self._shutdown:
+            # ——— wait for the first byte of a new burst ———
+            first = self.data_port.read(1)  # blocks until 1 byte arrives
+            if not first:
+                continue
+
+            buf = bytearray(first)
+
+            # drain any additional bytes that are already sitting in the UART buffer
+            n = self.data_port.in_waiting
+            if n:
+                buf.extend(self.data_port.read(n))
+
+            # ——— now, read until we hit an idle gap ———
+            # temporarily switch to a short timeout mode
+            self.data_port.timeout = self.idle
+
+            while not self._shutdown:
+                b = self.data_port.read(1)  # block up to `self.idle` seconds
+                if not b:
+                    # timeout ↦ no new byte for idle seconds ⇒ burst finished
+                    self._frame_queue.put(bytes(buf))
+                    buf.clear()
+                    break
+
+                buf.extend(b)
+                # drain any immediately‐available bytes
+                n = self.data_port.in_waiting
+                if n:
+                    buf.extend(self.data_port.read(n))
+
+            # restore blocking mode for next burst
+            self.data_port.timeout = None
+
+
+    def get_frame(self, block=False):
+        try:
+            return self._frame_queue.get(block=block)
+        except queue.Empty:
+            return None
+
     def _configure_radar(self, config):
         for i in config:
+            # idx = i.find('sensorStart') # skip "sensorStart" command
+            # if idx != -1:
+            #     continue
             self.cli_port.write((i + '\n').encode())
-            # print(i)
+            # print(i) # print configuration
             idx = i.find('frameCfg')
             if idx != -1:
                 global ms_per_frame
@@ -116,6 +174,26 @@ class TI:
                     4 * start_freq * 1e9 * (idle_time + ramp_end_time) * 1e-6 * num_tx_ant)
 
 
+    def sensor_stop(self):
+        """stop radar
+
+        Returns:
+            None
+
+        """
+        print("Stopping %s sensor" % frame_id)
+        self.cli_port.write('sensorStop\n'.encode())
+
+    def sensor_start(self):
+        """start radar
+
+        Returns:
+            None
+
+        """
+        print("Starting %s sensor" % frame_id)
+        self.cli_port.write('sensorStart 0\n'.encode())
+
     def close(self):
         """End connection between radar and machine
 
@@ -123,6 +201,8 @@ class TI:
             None
 
         """
+        self._shutdown = True
+        self.reader_thread.join(0.25)
         global frame_id
         print("Shutting down %s sensor" % frame_id)
         self.cli_port.write('sensorStop\n'.encode())
@@ -256,7 +336,6 @@ class Detected_Points(Node):
         self.publish_velocity = True
         self.publish_snr = True
         self.publish_noise = True
-        self.poll_rate = 5.0
 
         self.declare_parameter('data_port', data_port)
         self.declare_parameter('cli_port', cli_port)
@@ -268,7 +347,6 @@ class Detected_Points(Node):
         self.declare_parameter("publish_velocity", self.publish_velocity)
         self.declare_parameter("publish_snr", self.publish_snr)
         self.declare_parameter("publish_noise", self.publish_noise)
-        self.declare_parameter("poll_rate", self.poll_rate)
 
         data_port = self.get_parameter('data_port').get_parameter_value().string_value
         cli_port = self.get_parameter('cli_port').get_parameter_value().string_value
@@ -280,7 +358,13 @@ class Detected_Points(Node):
         self.publish_velocity = self.get_parameter('publish_velocity').get_parameter_value().bool_value
         self.publish_snr = self.get_parameter('publish_snr').get_parameter_value().bool_value
         self.publish_noise = self.get_parameter('publish_noise').get_parameter_value().bool_value
-        self.poll_rate = self.get_parameter('poll_rate').get_parameter_value().double_value
+
+        self.toggle_subscription = self.create_subscription(
+            ToggleRadar,
+            "/radar_toggle",
+            self.toggle_callback,
+            10
+        )
 
         self.azimuth_tan_constant = math.tan( (self.radar_azimuth_fov*0.01745329) / 2 ) # 0.01745329 = rad per deg
         self.elevation_tan_constant = math.tan( (self.radar_elevation_fov*0.01745329) / 2)
@@ -324,15 +408,11 @@ class Detected_Points(Node):
         global ms_per_frame
         self.MAGIC_WORD = b'\x02\x01\x04\x03\x06\x05\x08\x07'
         self.ti=TI(cli_loc=cli_port,data_loc=data_port,cfg_path=cfg_path)
-        self.data=b''
+        self.data = bytearray()
         self.warn=0
 
 
         self.publisher_ = self.create_publisher(PointCloud2, 'xwr6843_pcl', 10)
-        self.timer_period = ms_per_frame/(1000.0*self.poll_rate) # poll new data <poll_rate> times faster than frame rate
-        print(self.timer_period)
-        self.timer = self.create_timer(self.timer_period, self.data_stream_iterator)
-        self.serial_data_wait_iterations =  ( 1.0 / self.timer_period ) * 5.0
         self.frame_number_array = [[],[],[]]
         self.frame_number_array_ptr = 0
         self.frame_number_array_len = len(self.frame_number_array)
@@ -344,6 +424,8 @@ class Detected_Points(Node):
         self.num_fields = 3 + int(self.publish_velocity) + int(self.publish_snr) + int(self.publish_noise)
         self.pcl_msg.point_step = self.num_fields * 4  # each float32 = 4 bytes
 
+        threading.Thread(target=self._frame_consumer, daemon=True).start()
+
         self.get_logger().warn('Init %s radar' % frame_id)
 
 
@@ -352,18 +434,33 @@ class Detected_Points(Node):
         time.sleep(0.25)
         print("Radar ", frame_id, " exiting")
 
+    def toggle_callback(self, msg: ToggleRadar):
+        if hasattr(ToggleRadar, frame_id.upper()):
+            index = getattr(ToggleRadar, frame_id.upper()) # translate frame_id to array index
+            if msg.radar_toggle_array[index] == True:
+                self.ti.sensor_start()
+            if msg.radar_toggle_array[index] == False:
+                self.ti.sensor_stop()
+        else:
+            self.get_logger().warn('Frame %s has no match in ToggleRadar.msg' % frame_id)
 
-    def data_stream_iterator(self):
-        
-        byte_buffer=self.ti._read_buffer()
-    
-        self.data+=byte_buffer
+    def _frame_consumer(self):
+        while rclpy.ok():
+            frame = self.ti.get_frame(block=True)  # block until a full burst
+            # feed it into our existing parser/publisher
+            self.data_stream_iterator(frame)
+
+
+    def data_stream_iterator(self, burst_bytes):
+           
+        # accumulate serial data in a rolling buffer
+        self.data.extend(burst_bytes)
     
         try:
             idx = self.data.index(MAGIC_WORD)   
-            # self.warn = 0
 
         except:
+            self.data.clear()
             self.warn += 1
 
             if(self.warn > self.serial_data_wait_iterations): # after some seconds of unsuccessful buffer reads
@@ -388,8 +485,12 @@ class Detected_Points(Node):
         if len(self.data) < idx + packet_len:
             return
 
+        # extract exactly one packet; drop it from buffer
         frame = self.data[idx:idx+packet_len]
-        self.data=self.data[idx+packet_len:]  # drop parsed frame
+        # self.data=self.data[idx+packet_len:]  # drop parsed frame
+        del self.data[: idx + packet_len]
+
+        # parse into points
         success, points=self.ti._process_detected_points(frame) # self.data
         
         if not success: # not ready yet
@@ -459,14 +560,19 @@ class Detected_Points(Node):
 
 
 
-
-
 def main(argv=None):
+
+
+    global cfg_path
+    global data_port
+    global cli_port
+    global frame_id
+    
 
     #init
     rclpy.init()
     minimal_publisher = Detected_Points()
-    
+
     try:
         rclpy.spin(minimal_publisher)
     #shutdown
@@ -476,7 +582,6 @@ def main(argv=None):
         minimal_publisher._on_shutdown()
         minimal_publisher.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

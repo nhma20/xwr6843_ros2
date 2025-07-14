@@ -1,5 +1,8 @@
 # XWR6843 simple ROS2 package
 
+## Adds functionality to toggle on/off the radar sensor.
+
+
 ![mmw_pcl_gif](https://user-images.githubusercontent.com/76950970/194247603-18e9031a-7d34-4747-9926-9d35d6e3df4e.gif)
 
 Python ROS2 pointcloud retriever for XWR6843 mmWave devices
@@ -49,7 +52,7 @@ Derived from: https://github.com/nhma20/iwr6843aop_pub
    ```
    or with ROS2 parameters:
    ```sh
-   ros2 run xwr6843_ros2 pcl_pub --ros-args -p cli_port:=/dev/ttyUSB0 -p data_port:=/dev/ttyUSB1 -p cfg_path:=/home/nm/ros2_ws/src/xwr6843_ros2/cfg_files/90deg_noGroup_18m_30Hz.cfg -p frame_id:=test_frame -p radar_azimuth_fov:=120 -p publish_velocity:=true -p poll_rate:=5.0
+   ros2 run xwr6843_ros2 pcl_pub --ros-args -p cli_port:=/dev/ttyUSB0 -p data_port:=/dev/ttyUSB1 -p cfg_path:=/home/nm/ros2_ws/src/xwr6843_ros2/cfg_files/90deg_noGroup_18m_30Hz.cfg -p frame_id:=test_frame -p radar_azimuth_fov:=120 -p publish_velocity:=true 
    ```
    or launch with default parameters:
    ```sh
@@ -80,7 +83,6 @@ The following options can be appended to the `ros2 run xwr6843_ros2 pcl_pub` com
 `publish_velocity` - Boolean whether to publish radial dopper velocity information (m/s), default `true`  
 `publish_snr` - Boolean whether to publish SNR information (dB), default `true`  
 `publish_noise` - Boolean whether to publish noise information (dB), default `true`  
-`poll_rate` - Frame rate multiplier how often to poll for new data, default `5.0`  
 
 ## Modify
 

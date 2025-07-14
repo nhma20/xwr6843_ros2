@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
 			'pcl_pub = xwr6843_ros2.publisher_member_function:main',
+            'radar_toggle = xwr6843_ros2.toggle_radar_test:main'
         ],
     },
 )
