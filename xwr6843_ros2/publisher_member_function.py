@@ -181,7 +181,7 @@ class TI:
             None
 
         """
-        print("Stopping %s sensor" % frame_id)
+        # print("Stopping %s sensor" % frame_id)
         self.cli_port.write('sensorStop\n'.encode())
 
     def sensor_start(self):
@@ -191,7 +191,7 @@ class TI:
             None
 
         """
-        print("Starting %s sensor" % frame_id)
+        # print("Starting %s sensor" % frame_id)
         self.cli_port.write('sensorStart 0\n'.encode())
 
     def close(self):
