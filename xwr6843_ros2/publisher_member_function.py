@@ -65,7 +65,7 @@ class TI:
                 return serial.Serial(
                     port=port,
                     baudrate=baud,
-                    timeout=None,
+                    timeout=1, #1 second None,
                     exclusive=False
                 )
             except serial.SerialException as e:
