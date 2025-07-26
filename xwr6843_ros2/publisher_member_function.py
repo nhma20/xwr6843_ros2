@@ -40,9 +40,8 @@ class TI:
         self.mode = mode
         self.cfg_path = cfg_path
         if connect:
-            self.cli_port = serial.Serial(cli_loc, cli_baud)
-            self.data_port = serial.Serial(data_loc, data_baud,
-                                       timeout=None, exclusive=False)
+            self.cli_port = serial.Serial(cli_loc, cli_baud, timeout=None, exclusive=False)
+            self.data_port = serial.Serial(data_loc, data_baud, timeout=None, exclusive=False)
             self.connected = True
         self.sdk_version = sdk_version
         self.num_rx_ant = num_rx
