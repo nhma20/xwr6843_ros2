@@ -42,7 +42,7 @@ class TI:
         if connect:
             self.cli_port = serial.Serial(cli_loc, cli_baud)
             self.data_port = serial.Serial(data_loc, data_baud,
-                                       timeout=None)
+                                       timeout=None, exclusive=False)
             self.connected = True
         self.sdk_version = sdk_version
         self.num_rx_ant = num_rx
