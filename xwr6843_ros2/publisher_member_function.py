@@ -40,8 +40,8 @@ class TI:
         self.mode = mode
         self.cfg_path = cfg_path
         if connect:
-            self.cli_port = self.open_with_retry(cli_loc, cli_baud) #serial.Serial(cli_loc, cli_baud, timeout=None, exclusive=False)
-            self.data_port = self.open_with_retry(data_loc, data_baud) #serial.Serial(data_loc, data_baud, timeout=None, exclusive=False)
+            self.cli_port = self.open_with_retry(port=cli_loc, baud=cli_baud) #serial.Serial(cli_loc, cli_baud, timeout=None, exclusive=False)
+            self.data_port = self.open_with_retry(port=data_loc, baud=data_baud) #serial.Serial(data_loc, data_baud, timeout=None, exclusive=False)
             self.connected = True
         self.sdk_version = sdk_version
         self.num_rx_ant = num_rx
@@ -59,7 +59,7 @@ class TI:
         self.reader_thread.start()
 
     # try to open the serial port 5 times
-    def open_with_retry(port, baud, retries=5, delay=0.5):
+    def open_with_retry(self, port, baud, retries=5, delay=0.5):
         for attempt in range(1, retries+1):
             try:
                 return serial.Serial(
