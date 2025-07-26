@@ -39,7 +39,7 @@ class TI:
         self.verbose = verbose
         self.mode = mode
         self.cfg_path = cfg_path
-                if connect:
+        if connect:
             self.cli_port = self.open_with_retry(cli_loc, cli_baud) #serial.Serial(cli_loc, cli_baud, timeout=None, exclusive=False)
             self.data_port = self.open_with_retry(data_loc, data_baud) #serial.Serial(data_loc, data_baud, timeout=None, exclusive=False)
             self.connected = True
